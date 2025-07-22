@@ -1,0 +1,43 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from datetime import datetime
+from decimal import Decimal
+
+class LineItem(BaseModel):
+    """Individual item on the receipt"""
+    description: str = Field(..., description="Item description")
+    quantity: Optional[int] = Field(None, description="Quantity purchased")
+    unit_price: Optional[Decimal] = Field(None, description="Price per unit")
+    total_price: Decimal = Field(..., description="Total price for this item")
+
+class MerchantInfo(BaseModel):
+    """Merchant/store information"""
+    name: str = Field(..., description="Store/merchant name")
+    address: Optional[str] = Field(None, description="Store address")
+    phone: Optional[str] = Field(None, description="Store phone number")
+
+class TransactionInfo(BaseModel):
+    """Transaction details"""
+    date: Optional[str] = Field(None, description="Transaction date")
+    time: Optional[str] = Field(None, description="Transaction time")
+    subtotal: Optional[Decimal] = Field(None, description="Subtotal before tax")
+    tax: Optional[Decimal] = Field(None, description="Tax amount")
+    total: Decimal = Field(..., description="Total amount")
+    payment_method: Optional[str] = Field(None, description="Payment method used")
+
+class ReceiptData(BaseModel):
+    """Complete receipt data structure"""
+    merchant: MerchantInfo
+    transaction: TransactionInfo
+    items: List[LineItem] = Field(..., description="List of items purchased")
+    raw_text: Optional[str] = Field(None, description="Original OCR text for debugging")
+    
+    class Config:
+        json_encoders = {
+            Decimal: float
+        }
+
+class ErrorResponse(BaseModel):
+    """Error response model"""
+    detail: str
+    error_code: Optional[str] = None
