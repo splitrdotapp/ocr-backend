@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from models import ReceiptData, MerchantInfo, TransactionInfo, LineItem
 from decimal import Decimal
 import re
