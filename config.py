@@ -1,5 +1,8 @@
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
     """Application configuration"""
@@ -8,8 +11,8 @@ class Config:
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     
     # API Configuration
-    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    API_HOST: str = os.getenv("API_HOST", "localhost")
+    API_PORT: int = int(os.getenv("API_PORT", "8080"))
     
     # File Upload Limits
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "10485760"))  # 10MB default

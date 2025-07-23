@@ -2,8 +2,10 @@ from google.cloud import vision
 import logging
 from typing import Optional
 import os
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 class OCRService:
     """Service for extracting text from images using Google Cloud Vision"""
@@ -11,14 +13,27 @@ class OCRService:
     def __init__(self):
         """Initialize the Google Cloud Vision client"""
         try:
+            # Check if credentials are available
+            creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if creds_path:
+                if not os.path.exists(creds_path):
+                    raise Exception(f"Credentials file not found at: {creds_path}")
+                logger.info(f"Using credentials from: {creds_path}")
+            else:
+                logger.info("GOOGLE_APPLICATION_CREDENTIALS not set, trying default credentials")
+            
             # Initialize the Google Cloud Vision client
-            # Make sure to set GOOGLE_APPLICATION_CREDENTIALS environment variable
-            # or use Google Cloud SDK authentication
             self.client = vision.ImageAnnotatorClient()
             logger.info("Google Cloud Vision client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize Google Cloud Vision client: {e}")
-            raise
+            error_msg = f"Failed to initialize Google Cloud Vision client: {e}"
+            if "default credentials" in str(e).lower():
+                error_msg += "\n\nSolutions:\n"
+                error_msg += "1. Set GOOGLE_APPLICATION_CREDENTIALS environment variable\n"
+                error_msg += "2. Run 'gcloud auth application-default login'\n"
+                error_msg += "3. Ensure your service account key file exists and has proper permissions"
+            logger.error(error_msg)
+            raise Exception(error_msg)
     
     async def extract_text(self, image_content: bytes) -> str:
         """
