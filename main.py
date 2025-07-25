@@ -1,10 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from models import ReceiptData, ErrorResponse
+from models import ReceiptData, ErrorResponse, ImageRequest
 from ocr_service import OCRService
 from receipt_parser import ReceiptParser
 import logging
+import base64
 from config import config
 
 # Configure logging
@@ -31,37 +32,48 @@ ocr_service = OCRService()
 receipt_parser = ReceiptParser()
 
 @app.post("/process-receipt", response_model=ReceiptData)
-async def process_receipt(file: UploadFile = File(...)):
+async def process_receipt(request: ImageRequest):
     """
     Process a receipt image and extract structured data.
     
     Args:
-        file: Image file (JPEG, PNG, etc.)
+        request: ImageRequest containing base64 encoded image
         
     Returns:
         ReceiptData: Structured receipt information
     """
     try:
-        # Validate file type
-        if not file.content_type or not file.content_type.startswith('image/'):
+        # Validate base64 string
+        if not request.image_base64:
             raise HTTPException(
                 status_code=400,
-                detail="File must be an image (JPEG, PNG, etc.)"
+                detail="image_base64 field is required"
             )
         
-        # Read file content
-        file_content = await file.read()
-        
-        if len(file_content) == 0:
+        # Decode base64 image
+        try:
+            # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+            base64_data = request.image_base64
+            if ',' in base64_data:
+                base64_data = base64_data.split(',')[1]
+            
+            image_bytes = base64.b64decode(base64_data)
+        except Exception as e:
             raise HTTPException(
                 status_code=400,
-                detail="Empty file provided"
+                detail=f"Invalid base64 image data: {str(e)}"
             )
         
-        logger.info(f"Processing receipt image: {file.filename}")
+        if len(image_bytes) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Decoded image is empty"
+            )
+        
+        logger.info("Processing base64 encoded receipt image")
         
         # Extract text using OCR
-        raw_text = await ocr_service.extract_text(file_content)
+        raw_text = await ocr_service.extract_text(image_bytes)
         
         if not raw_text.strip():
             raise HTTPException(
@@ -89,5 +101,5 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Receipt OCR API"}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)
+# if __name__ == "__main__":
+#     uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)

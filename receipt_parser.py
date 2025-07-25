@@ -5,19 +5,27 @@ from models import ReceiptData, MerchantInfo, TransactionInfo, LineItem
 from decimal import Decimal
 import re
 import aiohttp
+import os
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+load_dotenv()  # Load environment variables from .env file
 
 class ReceiptParser:
-    """Service for parsing raw OCR text into structured receipt data using Claude API"""
+    """Service for parsing raw OCR text into structured receipt data using OpenAI GPT"""
     
     def __init__(self):
         """Initialize the receipt parser"""
-        self.api_url = "https://api.anthropic.com/v1/messages"
+        self.api_url = "https://api.openai.com/v1/chat/completions"
+        self.api_key = os.getenv("OPENAI_API_KEY", "YOUR_OPENAI_API_KEY_HERE")
+        self.model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")  # or "gpt-4", "gpt-4-turbo"
+        
+        if self.api_key == "YOUR_OPENAI_API_KEY_HERE" or not self.api_key:
+            logger.warning("OpenAI API key not set. Please set OPENAI_API_KEY environment variable.")
         
     async def parse_receipt(self, raw_text: str) -> ReceiptData:
         """
-        Parse raw OCR text into structured receipt data using Claude API
+        Parse raw OCR text into structured receipt data using OpenAI GPT
         
         Args:
             raw_text: Raw text extracted from receipt image
@@ -26,11 +34,11 @@ class ReceiptParser:
             ReceiptData: Structured receipt information
         """
         try:
-            # Create prompt for Claude to parse the receipt
+            # Create prompt for GPT to parse the receipt
             prompt = self._create_parsing_prompt(raw_text)
             
-            # Call Claude API
-            parsed_data = await self._call_claude_api(prompt)
+            # Call OpenAI API
+            parsed_data = await self._call_openai_api(prompt)
             
             # Convert to ReceiptData model
             receipt_data = self._convert_to_receipt_data(parsed_data, raw_text)
@@ -42,14 +50,14 @@ class ReceiptParser:
             raise Exception(f"Receipt parsing failed: {str(e)}")
     
     def _create_parsing_prompt(self, raw_text: str) -> str:
-        """Create a prompt for Claude to parse the receipt"""
+        """Create a prompt for GPT to parse the receipt"""
         return f"""
         You are an expert at parsing receipt data. Please analyze the following raw OCR text from a receipt and extract structured information.
 
         Raw OCR Text:
         {raw_text}
 
-        Please extract and return ONLY a valid JSON object with the following structure. Do not include any other text or formatting:
+        Please extract and return ONLY a valid JSON object with the following structure. Do not include any other text, explanations, or formatting:
 
         {{
             "merchant": {{
@@ -82,56 +90,77 @@ class ReceiptParser:
         - If quantity is not specified, assume 1
         - Be as accurate as possible with item descriptions
         - Total should match the final amount paid
-        - Your response must be valid JSON only, no other text
+        - Look for common receipt patterns like subtotal, tax, and total lines
+        - Identify the merchant name, usually at the top of the receipt
+        - Extract date and time from timestamp information
+        - Your response must be valid JSON only, no other text or formatting
 
-        DO NOT OUTPUT ANYTHING OTHER THAN VALID JSON.
+        RESPOND ONLY WITH VALID JSON. NO OTHER TEXT.
         """
     
-    async def _call_claude_api(self, prompt: str) -> Dict[str, Any]:
-        """Call Claude API to parse the receipt"""
+    async def _call_openai_api(self, prompt: str) -> Dict[str, Any]:
+        """Call OpenAI API to parse the receipt"""
         try:
+            if self.api_key == "YOUR_OPENAI_API_KEY_HERE" or not self.api_key:
+                raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
+            
             payload = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 2000,
+                "model": self.model,
                 "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a receipt parsing expert. You must respond only with valid JSON data, no explanations or additional text."
+                    },
                     {
                         "role": "user",
                         "content": prompt
                     }
-                ]
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.1,  # Low temperature for consistent, factual responses
+                "response_format": {"type": "json_object"}  # Force JSON response (GPT-4 Turbo feature)
+            }
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     self.api_url,
-                    headers={
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json=payload
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
-                        raise Exception(f"Claude API error: {response.status} - {error_text}")
+                        logger.error(f"OpenAI API error: {response.status} - {error_text}")
+                        raise Exception(f"OpenAI API error: {response.status} - {error_text}")
                     
                     response_data = await response.json()
                     
-                    # Extract the text content from Claude's response
-                    claude_text = response_data["content"][0]["text"]
+                    # Extract the text content from OpenAI's response
+                    if "choices" not in response_data or len(response_data["choices"]) == 0:
+                        raise Exception("No response from OpenAI API")
+                    
+                    gpt_text = response_data["choices"][0]["message"]["content"]
                     
                     # Clean up the response (remove any markdown formatting)
-                    cleaned_text = re.sub(r'```json\n?', '', claude_text)
+                    cleaned_text = re.sub(r'```json\n?', '', gpt_text)
                     cleaned_text = re.sub(r'```\n?', '', cleaned_text).strip()
                     
                     # Parse JSON
                     parsed_data = json.loads(cleaned_text)
                     
+                    logger.info("Successfully parsed receipt using OpenAI GPT")
                     return parsed_data
                     
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Claude's JSON response: {e}")
-            raise Exception("Failed to parse receipt data from LLM response")
+            logger.error(f"Failed to parse GPT's JSON response: {e}")
+            logger.error(f"Raw response: {gpt_text}")
+            raise Exception("Failed to parse receipt data from GPT response")
         except Exception as e:
-            logger.error(f"Claude API call failed: {e}")
+            logger.error(f"OpenAI API call failed: {e}")
             raise
     
     def _convert_to_receipt_data(self, parsed_data: Dict[str, Any], raw_text: str) -> ReceiptData:
@@ -191,3 +220,7 @@ class ReceiptParser:
             return Decimal(str(value))
         except:
             return None
+    
+    def is_available(self) -> bool:
+        """Check if the OpenAI API service is available"""
+        return self.api_key and self.api_key != "YOUR_OPENAI_API_KEY_HERE"

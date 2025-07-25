@@ -3,6 +3,10 @@ from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
 
+class ImageRequest(BaseModel):
+    """Request model for base64 encoded image"""
+    image_base64: str = Field(..., description="Base64 encoded image data")
+
 class LineItem(BaseModel):
     """Individual item on the receipt"""
     description: str = Field(..., description="Item description")

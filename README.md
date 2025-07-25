@@ -4,11 +4,13 @@ A FastAPI backend service that processes receipt images using OCR and extracts s
 
 ## Features
 
-- **OCR Processing**: Uses Google Cloud Vision API to extract text from receipt images
-- **AI-Powered Parsing**: Uses Claude API to intelligently parse raw OCR text into structured data
+- **OCR Processing**: Uses EasyOCR (completely free) to extract text from receipt images
+- **AI-Powered Parsing**: Uses OpenAI GPT models to intelligently parse raw OCR text into structured data
 - **REST API**: Simple POST endpoint for processing receipts
 - **Structured Output**: Returns JSON with merchant info, transaction details, and line items
 - **Error Handling**: Comprehensive error handling and validation
+- **No Cloud Dependencies**: OCR runs completely offline (only OpenAI API requires internet)
+- **Flexible Model Choice**: Supports GPT-3.5-turbo, GPT-4, or GPT-4-turbo
 
 ## Project Structure
 
@@ -16,8 +18,8 @@ A FastAPI backend service that processes receipt images using OCR and extracts s
 receipt-ocr-backend/
 ├── main.py              # FastAPI application entry point
 ├── models.py            # Pydantic data models
-├── ocr_service.py       # Google Cloud Vision OCR service
-├── receipt_parser.py    # Claude API receipt parsing service
+├── ocr_service.py       # EasyOCR service
+├── receipt_parser.py    # OpenAI GPT receipt parsing service
 ├── config.py           # Configuration settings
 ├── requirements.txt    # Python dependencies
 └── README.md          # This file
@@ -31,15 +33,15 @@ receipt-ocr-backend/
 pip install -r requirements.txt
 ```
 
-### 2. Google Cloud Vision Setup
+**Note**: First installation of EasyOCR will download language models (~50MB for English).
 
-1. Create a Google Cloud project
-2. Enable the Vision API
-3. Create a service account and download the JSON key file
-4. Set the environment variable:
+### 2. OpenAI API Setup
+
+1. Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Set the environment variable:
 
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/service-account-key.json"
+export OPENAI_API_KEY="your-openai-api-key-here"
 ```
 
 ### 3. Environment Variables (Optional)
@@ -48,7 +50,11 @@ export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/service-account-key.json"
 export API_HOST="0.0.0.0"
 export API_PORT="8000"
 export LOG_LEVEL="INFO"
-export MAX_FILE_SIZE="10485760"  # 10MB
+export OPENAI_API_KEY="your-openai-api-key-here"
+export OPENAI_MODEL="gpt-3.5-turbo"    # Options: gpt-3.5-turbo, gpt-4, gpt-4-turbo
+export OCR_LANGUAGES="en"              # Comma-separated: "en,es,fr"
+export OCR_GPU="false"                 # Set to "true" if you have CUDA GPU
+export OCR_CONFIDENCE_THRESHOLD="0.3"  # Minimum confidence for text detection
 ```
 
 ## Usage
@@ -73,14 +79,43 @@ Process a receipt image and extract structured data.
 
 **Request:**
 - Method: POST
-- Content-Type: multipart/form-data
-- Body: Image file (JPEG, PNG, etc.)
+- Content-Type: application/json
+- Body: JSON with base64 encoded image
+
+**Request Body:**
+```json
+{
+  "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAM..."
+}
+```
 
 **Example using curl:**
 
 ```bash
 curl -X POST "http://localhost:8000/process-receipt" \
-     -F "file=@receipt.jpg"
+     -H "Content-Type: application/json" \
+     -d '{
+       "image_base64": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAM..."
+     }'
+```
+
+**Example using Python:**
+
+```python
+import base64
+import requests
+
+# Read and encode image
+with open("receipt.jpg", "rb") as image_file:
+    base64_string = base64.b64encode(image_file.read()).decode()
+
+# Make API request
+response = requests.post(
+    "http://localhost:8000/process-receipt",
+    json={"image_base64": base64_string}
+)
+
+print(response.json())
 ```
 
 **Response:**
@@ -148,11 +183,30 @@ The API returns appropriate HTTP status codes:
 
 ## Notes
 
-- The service requires both Google Cloud Vision API and Claude API to be available
-- Claude API calls are made without authentication (handled by the backend)
-- Maximum file size is 10MB by default
+- **Completely Free OCR**: Uses EasyOCR which runs locally with no API costs
+- **OpenAI API Required**: You need an OpenAI API key for receipt parsing
+- **Model Options**: Supports GPT-3.5-turbo (cheaper, fast) or GPT-4 (more accurate, slower)
+- **First Run**: EasyOCR will download language models on first use (~50MB for English)
+- **GPU Support**: Set `OCR_GPU=true` if you have CUDA GPU for faster processing
+- **Languages**: Supports 80+ languages - modify `OCR_LANGUAGES` environment variable
+- **Offline OCR**: OCR works completely offline (only OpenAI API requires internet)
+- Images should be sent as base64 encoded strings in JSON requests
+- The API accepts base64 data with or without data URL prefixes
 - Supported image formats: JPEG, PNG, GIF, BMP, WebP
 - The `raw_text` field in the response contains the original OCR output for debugging
+
+## OpenAI API Costs
+
+- **GPT-3.5-turbo**: ~$0.001 per receipt (very affordable)
+- **GPT-4**: ~$0.03 per receipt (more expensive but better accuracy)
+- **GPT-4-turbo**: ~$0.01 per receipt (good balance of cost/performance)
+
+## Performance Notes
+
+- **CPU Processing**: Without GPU, processing takes 2-5 seconds per image
+- **GPU Processing**: With CUDA GPU, processing takes 0.5-1 seconds per image
+- **Memory Usage**: Requires ~1GB RAM for the EasyOCR models
+- **Accuracy**: Very good for printed text, decent for handwritten text
 
 ## Development
 
