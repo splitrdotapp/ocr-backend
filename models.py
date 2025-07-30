@@ -35,11 +35,13 @@ class ReceiptData(BaseModel):
     transaction: TransactionInfo
     items: List[LineItem] = Field(..., description="List of items purchased")
     raw_text: Optional[str] = Field(None, description="Original OCR text for debugging")
-    
-    class Config:
-        json_encoders = {
-            Decimal: float
-        }
+
+class Response(BaseModel):
+    """Success response model"""
+    status: str = Field("success", description="Response status")
+    status_code: int = Field(200, description="HTTP status code")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+    data: ReceiptData = Field(..., description="Extracted receipt data")
 
 class ErrorResponse(BaseModel):
     """Error response model"""

@@ -1,16 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from models import ReceiptData, ErrorResponse, ImageRequest
+from models import ReceiptData, ErrorResponse, Response
 from ocr_service import OCRService
 from receipt_parser import ReceiptParser
 import logging
-import base64
 from config import config
+from transformers import create_success_response, create_error_response, receipt_data_to_json_with_formatting, receipt_data_to_dict
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 app = FastAPI(
     title="Receipt OCR API",
@@ -31,46 +31,61 @@ app.add_middleware(
 ocr_service = OCRService()
 receipt_parser = ReceiptParser()
 
-@app.post("/process-receipt", response_model=ReceiptData)
-async def process_receipt(request: ImageRequest):
+@app.post("/process-receipt", response_model=Response)
+async def process_receipt(file: UploadFile = File(...)):
     """
     Process a receipt image and extract structured data.
     
     Args:
-        request: ImageRequest containing base64 encoded image
+        file: UploadFile containing the receipt image
         
     Returns:
         ReceiptData: Structured receipt information
     """
+    logger.info("Received request to process receipt image")
     try:
-        # Validate base64 string
-        if not request.image_base64:
+        # Validate file upload
+        if not file:
             raise HTTPException(
                 status_code=400,
-                detail="image_base64 field is required"
+                detail="No file uploaded"
             )
         
-        # Decode base64 image
+        # Check if file is an image
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be an image (JPEG, PNG, etc.)"
+            )
+        
+        # Check file size (optional - adjust max size as needed)
+        max_file_size = 10 * 1024 * 1024  # 10MB
+        file_size = 0
+        
+        # Read file content
         try:
-            # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
-            base64_data = request.image_base64
-            if ',' in base64_data:
-                base64_data = base64_data.split(',')[1]
+            image_bytes = await file.read()
+            file_size = len(image_bytes)
             
-            image_bytes = base64.b64decode(base64_data)
+            if file_size == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Uploaded file is empty"
+                )
+            
+            if file_size > max_file_size:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File size ({file_size} bytes) exceeds maximum allowed size ({max_file_size} bytes)"
+                )
+                
         except Exception as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid base64 image data: {str(e)}"
+                detail=f"Error reading uploaded file: {str(e)}"
             )
         
-        if len(image_bytes) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Decoded image is empty"
-            )
-        
-        logger.info("Processing base64 encoded receipt image")
+        logger.info(f"Processing uploaded receipt image: {file.filename} ({file_size} bytes)")
         
         # Extract text using OCR
         raw_text = await ocr_service.extract_text(image_bytes)
@@ -83,9 +98,12 @@ async def process_receipt(request: ImageRequest):
         
         # Parse receipt data using LLM
         receipt_data = await receipt_parser.parse_receipt(raw_text)
-        
+
         logger.info("Receipt processed successfully")
-        return receipt_data
+
+        print(create_success_response(receipt_data))
+
+        return create_success_response(receipt_data)
         
     except HTTPException:
         raise
@@ -101,5 +119,5 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Receipt OCR API"}
 
-# if __name__ == "__main__":
-#     uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)
+if __name__ == "__main__":
+    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)
